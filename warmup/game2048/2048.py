@@ -73,6 +73,11 @@ class Grid:
         
     # B = AT,ie b(i,j) = a(j,i)
     def transpose(self):
+#         new_cells = [[0 for _ in range(self.size)] for _ in range(self.size) ]
+#         for i in range(self.size):
+#             for j in range(self.size):
+#                 new_cells[i][j] = self.cells[j][i]
+#         self.cells = new_cells
         self.cells = [ list(row)  for row in zip(*self.cells) ]
     
     
@@ -189,7 +194,6 @@ class Grid:
     #   scores are stored in Grid.add_score
     # Return:  action is taken or not
     def move(self,direction):
-        self.add_score = 0
         if self.can_move(direction):
             score = getattr(self,'move_'+direction)()
             self.add_random_item()
@@ -197,6 +201,12 @@ class Grid:
             return True
         else:
             return False
+    
+    # Return score accumulated in the move action ,and set it to 0
+    def take_add_score(self):
+        add_score = self.add_score
+        self.add_score = 0
+        return add_score
     
     def is_over(self):
         return not any(self.can_move(direction) for direction in Action.directions)
@@ -217,32 +227,27 @@ class Screen:
     over_string  = "       GAME OVER"
     win_string   = "       YOU WIN!"
     
-    def __init__(self, screen, grid,score, best_score,over=False,win=False):
+    def __init__(self, screen, ):
         self.screen = screen
-        self.grid = grid
-        self.score = score
-        self.best_score = best_score
-        self.over = over
-        self.win = win
+      
     
-    # display one row on scree
+    # display one row on screen
     def cast(self,string):
         self.screen.addstr(string + "\n")
     
-    def draw_row(self,row):
-        self.cast(''.join( '|{:^5}'.format(col) if col> 0 else "|     " for col in row ) + "|")
-        
-    def draw(self):
+    
+    # Display all information
+    def draw(self,grid,score, best_score,over=False,win=False):
         self.screen.clear()
-        self.cast('SCORE:{:5d}      BEST_SCORE:{:5d}' .format(self.score,self.best_score))
-        for row in self.grid.cells:
-            self.cast('+-----'*self.grid.size+"+")
-            self.draw_row(row)
-        self.cast('+-----'*self.grid.size+"+")
+        self.cast('SCORE:{:5d}      BEST_SCORE:{:5d}' .format(score,best_score))
+        for row in grid.cells:
+            self.cast('+-----'*grid.size+"+")
+            self.cast(''.join( '|{:^5}'.format(col) if col> 0 else "|     " for col in row ) + "|")
+        self.cast('+-----'*grid.size+"+")
         
-        if self.win:
+        if win:
             self.cast(self.win_string)
-        elif self.over:
+        elif over:
             self.cast(self.over_string)
         else:
             self.cast(self.help_string1)
@@ -263,8 +268,8 @@ class GameManager:
         self.size = size
         self.win_num = win_num
         self.action = Action(stdscr)
-        self.stdscr= stdscr
         self.best_score = 0
+        self.screen = Screen(stdscr)
         self.reset()
         
         
@@ -276,9 +281,7 @@ class GameManager:
         self.grid= Grid(self.size)
         self.grid.reset()
         
-    def screen(self):
-        return Screen(screen=self.stdscr, score=self.score, best_score=self.best_score, grid=self.grid, win=self.win, over=self.over)
-    
+ 
     
     def is_win(self):
         self.win= self.grid.is_win(self.win_num)
@@ -295,8 +298,12 @@ class GameManager:
     def move(self,direction):
         return self.grid.move(direction)
     
+    def get_dispaly_info(self):
+        return dict(score=self.score, best_score=self.best_score, grid=self.grid, win=self.win, over=self.over)
+    
+    # State machine:  GAME --> GAME, WIN, OVER
     def state_game(self):
-        self.screen().draw()
+        self.screen.draw(**self.get_dispaly_info())
         action = self.action.get()
         if action == Action.RESTART:
             return GameManager.INIT
@@ -304,7 +311,7 @@ class GameManager:
             return GameManager.EXIT
        
         if self.move(action):
-            self.score += self.grid.add_score
+            self.score += self.grid.take_add_score()
            
             if self.is_win():
                 if self.score > self.best_score:
@@ -317,7 +324,7 @@ class GameManager:
         return GameManager.GAME
     
     def state_win(self):
-        self.screen().draw()
+        self.screen.draw(**self.get_dispaly_info())
         action = self.action.get()
         if  action== Action.RESTART:
             return GameManager.INIT
@@ -327,7 +334,7 @@ class GameManager:
             return GameManager.WIN
         
     def state_over(self):
-        self.screen().draw()
+        self.screen.draw(**self.get_dispaly_info())
         action = self.action.get()
         if  action== Action.RESTART:
             return GameManager.INIT
@@ -342,7 +349,7 @@ class GameManager:
         
     
 def main(stdscr):
-    g = GameManager(stdscr,4,64)
+    g = GameManager(stdscr,4,2048)
     g.loop()
     
    
