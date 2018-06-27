@@ -11,7 +11,7 @@ Created on 2018年6月26日
 from random import choice
 import itertools
 #import logging
-   
+    
 
 import curses
 
