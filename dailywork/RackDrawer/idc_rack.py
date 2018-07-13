@@ -32,7 +32,7 @@ class IDCRecordRow:
         return self.values[1]
     
     def is_summary_item(self):
-        return self.values[0].strip() == "汇总条目"
+        return self.values[0].strip() == "存储设备" and (self.values[-1] is not None  and self.values[-1].strip()=="汇总记录")
       
     # supported patters:  12U |  12 | 12-13 | 13-12 | 12U-13U
     def get_u_range(self):
@@ -60,6 +60,7 @@ class IDCRecordRow:
 
 
 
+
 class SourceReader:
     
     def __init__(self):
@@ -79,12 +80,25 @@ class SourceReader:
         record_col_count = len(IDCRecordRow.headers)
         for row in ws.rows:
             # skip header row
-            if row[0].value!='设备类型':            
-                record = IDCRecordRow(cell.value for cell in row[:record_col_count])
-                if not record.is_summary_item():
-                    records_per_rack[record.rack].append(record)
-                    count +=1
+            if row[0].value=='设备类型':
+                continue     
+                   
+            record = IDCRecordRow(cell.value for cell in row[:record_col_count])
+            if not record.is_summary_item():
+                records_per_rack[record.rack].append(record)
+                count +=1
         print("Load {} items in {} racks from file '{}'".format(count,len(records_per_rack), filepath ))
+        
+        # check overlap
+      
+        for rack_name in records_per_rack:
+            u_range_list = []
+            for record in records_per_rack[rack_name]:
+                start,end = record.get_u_range()
+                for r_start, r_end in u_range_list:
+                    if (start >= r_start and start<=r_end)  or (end >=r_start and end <=r_end):
+                        print("WARN: Rack {} has overlap:  [{}-{}] x [{}-{}] ".format(rack_name, start, end, r_start,r_end))
+                u_range_list.append([start,end])
         
         self.records_per_rack = records_per_rack
         self._item_count = count
