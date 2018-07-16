@@ -13,7 +13,7 @@ from openpyxl.reader.excel import load_workbook
 
 class EventRecordRow:
     
-    headers = "日期    变更类型    单据编号    品牌    型号    序列号    快速服务代码    使用部门    使用人    备注"
+    headers = "日期    变更类型    单据编号    品牌    型号    序列号    快速服务代码    使用部门    使用人    备注".split()
     
     @classmethod
     def header_length(cls):
@@ -82,7 +82,9 @@ class PCEventsStore:
             # empty row: stop
             if row[0].value is None and row[1].value is None and row[2].value is None:
                 break            
-            record =  EventRecordRow([cell.value for cell in row[:record_col_count]])
+            
+            values = [cell.value for cell in row[:record_col_count]]
+            record =  EventRecordRow(values)
             # if no seq_no, bad rows 
             if record.seq_no is None or record.seq_no=='未带待核实':
                 incomplete_events.append(record)
@@ -102,6 +104,7 @@ class PCEventsStore:
     
     def validate_events_sequences(self):       
         bad_pattern_seqs = defaultdict(list)
+        lack_sheet_seqs = []
         for seq,events in self.seq_events.items():
             # sort by date
             events.sort(key=attrgetter('event_date'))
@@ -109,7 +112,13 @@ class PCEventsStore:
             if not EventsValidator.is_events_valide(event_types):
                 pattern = "-".join(event_types)
                 bad_pattern_seqs[pattern].append(seq)
-        return bad_pattern_seqs
+            
+            last_event = events[-1]
+            if event_types[-1] in ['借用', '领用'] and last_event.sheet_no is None:
+                lack_sheet_seqs.append(last_event)
+                
+                
+        return bad_pattern_seqs,lack_sheet_seqs
        
 def main():
     filepath = r'testdata\pcs.xlsx'
@@ -118,10 +127,14 @@ def main():
     print("Load {} events from file {}; Bad records: {}".format(store.count, filepath, len(store.incomplete_events)))
     print("... about {} machines.".format(len(store.seq_events)))
     
-    bad_pattern_seqs = store.validate_events_sequences()
+    bad_pattern_seqs,lack_sheet_seqs = store.validate_events_sequences()
     print("Bad sequence of events[{}]:".format(len(bad_pattern_seqs)))
     for p,seqs in bad_pattern_seqs.items():
         print("{} : {}".format(p, ','.join(seqs)))
+        
+    print("Those machines are lacking a sheet no:")
+    for event in lack_sheet_seqs:
+        print(event.values)
 
     
 
