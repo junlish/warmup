@@ -18,7 +18,7 @@ from openpyxl.reader.excel import load_workbook
 
 
 # MAX u_no from source excel file
-MAX_U_COUNT = 44
+MAX_U_COUNT = 45
 
 
 class IDCRecordRow:
@@ -72,9 +72,11 @@ class SourceReader:
         
     
     #read records from a xlsx file, and return a dict of rack --> list of items
-    def load_from_file(self,filepath):
+    def load_from_file(self,filepath, sheet_name):
         wb = load_workbook(filepath, read_only=True)
-        ws = wb['Sheet1']
+        if sheet_name not in wb.sheetnames:
+            sheet_name = 'Sheet1'   # using default sheet 'Sheet1'
+        ws = wb[sheet_name]
         records_per_rack = defaultdict(list)
         count =0
         record_col_count = len(IDCRecordRow.headers)
@@ -228,9 +230,9 @@ def render_rack(ws, rack_name,  reader, ws_start_row=1, ws_start_col=1):
             
     
 
-def render(source_filepath, result_filepath):
+def render(source_filepath, result_filepath, sheet_name):
     reader = SourceReader()
-    reader.load_from_file(source_filepath)
+    reader.load_from_file(source_filepath, sheet_name)
     columns = reader.columns
     print("Rack columns are:"+ str(columns))
        
@@ -280,6 +282,7 @@ def main():
     parser = argparse.ArgumentParser(description='机柜落位图生成器')
     parser.add_argument('--source', required=True, help='源数据文件，期待数据表格式：源文件表格格式： 设备类型    机柜位    机柜内位置    设备品牌    设备型号    设备序列号    固定资产条码    信息变更时间    备注')
     parser.add_argument('--output',  help='输出文件; 默认为源文件同目录下的gen-yyyymmdd-HHMMSS.xlsx')   
+    parser.add_argument('--sheet',  default='设备信息', help='输出文件; 默认为源文件同目录下的gen-yyyymmdd-HHMMSS.xlsx')   
     args = parser.parse_args()
     
     if not os.path.isfile(args.source):
@@ -290,7 +293,7 @@ def main():
         base_name ="gen-"+ datetime.datetime.now().strftime('%Y%m%d_%H%M%S') +".xlsx"
         args.output = os.path.join(os.path.dirname(args.source), base_name)
     
-    render(args.source , args.output)
+    render(args.source , args.output, args.sheet)
         
 if __name__ == '__main__':
     main()
