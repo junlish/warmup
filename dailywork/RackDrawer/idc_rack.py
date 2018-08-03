@@ -7,6 +7,7 @@ Created on 2018年7月11日
 '''
 import re
 from collections import defaultdict
+import csv
 import datetime
 import os.path
 import argparse
@@ -17,8 +18,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.reader.excel import load_workbook
 
 
-# MAX u_no from source excel file
-MAX_U_COUNT = 45
+
 
 
 class IDCRecordRow:
@@ -49,8 +49,8 @@ class IDCRecordRow:
             #  Example: 12
             start = int(u_no_range.strip())
             end = start
-        if end > MAX_U_COUNT:
-            raise ValueError("Invalid u_no：{} @ {}".format( self.values[2], self.rack))
+#        if end > MAX_U_COUNT:
+#            raise ValueError("Invalid u_no：{} @ {}".format( self.values[2], self.rack))
         
         return start,end
 
@@ -58,7 +58,51 @@ class IDCRecordRow:
     def header_length(cls):
         return len(cls.headers)
 
-
+'''
+    Read Rack configuration from a csv file, expected records:
+        RackName,UCount,1UPos,Comments
+'''
+class RacksConfig:
+    
+    def __init__(self, default_u_count=42, default_1U_from_bottom=True):
+        self.racks = {}
+        self.default_u_count = default_u_count
+        self.default_1U_from_bottom = default_1U_from_bottom
+        
+    
+    def load_from_file(self, filepath):
+        with open(filepath) as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                self.racks[row['RackName']] = (int(row['UCount']), row['1UPos'].lower()=="bottom")
+    
+    '''
+        Returns racks max u count and if 1u start from rack's bottom. 
+        If no configuration exists for this rack, return a default configuration.
+    '''                
+    def _get_rack_config(self, rackname):
+        if rackname in self.racks:
+            return self.racks[rackname]
+        else:
+            return (self.default_u_count, self.default_1U_from_bottom)
+    
+    
+    def get_rack_max_u_count(self,rackname):
+        return self._get_rack_config(rackname)[0]
+    
+    # create a mapping for u# and row#;
+    # start_row is the row# where put 1U
+    def get_rack_row_mapping(self, rackname, start_row):
+        rack_u_count, start_from_bottom = self._get_rack_config(rackname)
+        u_to_row_mapping = {}
+        for i in range(1,rack_u_count+1):
+            if start_from_bottom:
+                u_to_row_mapping[i] = rack_u_count - i + start_row
+            else:
+                u_to_row_mapping[i] = start_row+i-1
+        
+        return u_to_row_mapping
+        
 
 
 class SourceReader:
@@ -142,25 +186,30 @@ class SourceReader:
     
 rack_sheet_pos = {}     
     
-def render_column(ws, col_name,  reader ):
+def render_column(ws, col_name,  reader, rackconfig ):
     print("Rendering Column {} ...".format(col_name))  
     racks = reader.racks_in_col(col_name)
     ws.column_dimensions[get_column_letter(1)].width = 3
     ws.column_dimensions[get_column_letter(1+ IDCRecordRow.header_length()+ 1)].width = 3
     for i,width in enumerate(IDCRecordRow.header_widths):
         ws.column_dimensions[get_column_letter(2+i)].width = width
-        
+    
+    # draw each rack
+    start_row = 1
     for i,rack_name in enumerate(list(sorted(racks))):
-        render_rack(ws, rack_name, reader,1+(MAX_U_COUNT+6)*i, 1 )
+        rack_u_count = rackconfig.get_rack_max_u_count(rack_name)
+        render_rack(ws, rack_name, reader,rackconfig, start_row, 1  )
+        start_row = start_row + rack_u_count + 6
         
 
 
 thin_border = Border(left=Side(style='thin'),  right=Side(style='thin'), 
                      top=Side(style='thin'),  bottom=Side(style='thin'))
 
-def render_rack(ws, rack_name,  reader, ws_start_row=1, ws_start_col=1):
+def render_rack(ws, rack_name,  reader,  rackconfig,  ws_start_row=1, ws_start_col=1):
     records = reader.items_in_rack(rack_name)
     rack_render_start_pos = "{}{}".format(get_column_letter(ws_start_col),ws_start_row)
+    rack_u_count = rackconfig.get_rack_max_u_count(rack_name)
     rack_sheet_pos[rack_name] = rack_render_start_pos
     print("...Rendering rack {} @ {} [{} items / {} U]".format(rack_name, rack_render_start_pos, len(records), 
                                                                      reader.rack_used_u_count(rack_name)))
@@ -196,31 +245,44 @@ def render_rack(ws, rack_name,  reader, ws_start_row=1, ws_start_col=1):
     ws.cell(row=ws_start_row+1, column=ws_start_col).fill = header_fill
     ws.cell(row=ws_start_row+1, column=ws_start_col+ header_len+ 1 ).fill = header_fill
         
-    # draw u no#
+    
+   
+    u_to_row_dict = rackconfig.get_rack_row_mapping(rack_name, ws_start_row+2)  
+    
     u_no_fill = PatternFill("solid", fgColor='5CACEE')
-    u_to_row_dict = {}
-    for i in range(MAX_U_COUNT):
-        u_to_row_dict[MAX_U_COUNT-i] = ws_start_row+2+i
-        h_cell = ws.cell(row=ws_start_row+2+i,column=ws_start_col, value= MAX_U_COUNT-i)
-        t_cell = ws.cell(row=ws_start_row+2+i,column=ws_start_col+ header_len + 1, value= MAX_U_COUNT-i)
+    # draw u no#
+    for i in range(1, rack_u_count+1):
+        h_cell = ws.cell(row=u_to_row_dict[i],column=ws_start_col, value= i)
+        t_cell = ws.cell(row=u_to_row_dict[i],column=ws_start_col+ header_len + 1, value= i)
         h_cell.fill = u_no_fill
         t_cell.fill = u_no_fill
+    
+      
+       
     # draw items
     for item in records:
         start, end = item.get_u_range()        
+        # safe guard: if end > max rack u count, print out an error and do not draw this item
+        if end > rack_u_count:
+            print(("Invalid u_no：{} @ {}".format( end, rack_name)))
+            continue
+            
         for tab_i in range(header_len):
+            row_start, row_end = u_to_row_dict[start], u_to_row_dict[end]
+            if row_start > row_end:
+                row_start, row_end = row_end, row_start
             if start != end:
-                # need to merge cells    
-                ws.merge_cells(start_row=u_to_row_dict[end], start_column= ws_start_col+1+tab_i, end_row=u_to_row_dict[start],end_column= ws_start_col+1+tab_i )
+                # need to merge cells                    
+                ws.merge_cells(start_row=row_start, start_column= ws_start_col+1+tab_i, end_row=row_end,end_column= ws_start_col+1+tab_i )
             value = item.values[tab_i]
-            cell = ws.cell(row=u_to_row_dict[end],column= ws_start_col+1+tab_i,value=value  )    
+            cell = ws.cell(row=row_start,column= ws_start_col+1+tab_i,value=value  )    
             if value is not None and isinstance(value, datetime.datetime):
                 cell.number_format = 'yyyy-mm-dd'
             cell.alignment  = alcenter
             
     # set borders
     cell_range = ws[ "{}{}".format(get_column_letter(ws_start_col),ws_start_row): \
-                     "{}{}".format(get_column_letter(ws_start_col+ header_len + 1),ws_start_row+MAX_U_COUNT+1)]
+                     "{}{}".format(get_column_letter(ws_start_col+ header_len + 1),ws_start_row+rack_u_count+1)]
     
     thin = Side(border_style="thin", color="000000")
     border = Border(top=thin, left=thin, right=thin, bottom=thin)
@@ -230,9 +292,11 @@ def render_rack(ws, rack_name,  reader, ws_start_row=1, ws_start_col=1):
             
     
 
-def render(source_filepath, result_filepath, sheet_name):
+def render(source_filepath, rackconfig_filepath, result_filepath, sheet_name):
     reader = SourceReader()
     reader.load_from_file(source_filepath, sheet_name)
+    rackconfig = RacksConfig()
+    rackconfig.load_from_file(rackconfig_filepath)
     columns = reader.columns
     print("Rack columns are:"+ str(columns))
        
@@ -240,7 +304,7 @@ def render(source_filepath, result_filepath, sheet_name):
     for rack_col in columns:
         ws = wb.create_sheet(rack_col)
         #render_column(ws, rack_col, reader.racks_in_col(rack_col), records_per_rack )
-        render_column(ws, rack_col, reader)
+        render_column(ws, rack_col, reader, rackconfig)
         
     ws = wb.active
     ws.title = "Summary"
@@ -281,6 +345,7 @@ def render(source_filepath, result_filepath, sheet_name):
 def main():
     parser = argparse.ArgumentParser(description='机柜落位图生成器')
     parser.add_argument('--source', required=True, help='源数据文件，期待数据表格式：源文件表格格式： 设备类型    机柜位    机柜内位置    设备品牌    设备型号    设备序列号    固定资产条码    信息变更时间    备注')
+    parser.add_argument('--rackconfig', help='机柜最大U数，第1U的起始位置')
     parser.add_argument('--output',  help='输出文件; 默认为源文件同目录下的gen-yyyymmdd-HHMMSS.xlsx')   
     parser.add_argument('--sheet',  default='设备信息', help='输出文件; 默认为源文件同目录下的gen-yyyymmdd-HHMMSS.xlsx')   
     args = parser.parse_args()
@@ -288,16 +353,33 @@ def main():
     if not os.path.isfile(args.source):
         print("源文件{}不存在或不是文件.".format(args.source))
         exit(-1)
+        
+    if args.rackconfig is None:
+        default_config_path = os.path.join(os.path.dirname(args.source), 'racks.csv')
+        if not os.path.isfile(default_config_path):
+            default_config_path =  os.path.join(os.path.dirname(os.path.realpath(__file__)), 'config', 'racks.csv')
+        
+        if not os.path.isfile(default_config_path):
+            print("缺少机柜配置文件,也无法在默认文件夹找到配置文件")
+            exit(-2)        
+        
+        args.rackconfig = default_config_path
+        print("使用机柜配置文件：{}".format(default_config_path))
+        
+            
     
     if args.output is None:
         base_name ="gen-"+ datetime.datetime.now().strftime('%Y%m%d_%H%M%S') +".xlsx"
         args.output = os.path.join(os.path.dirname(args.source), base_name)
     
-    render(args.source , args.output, args.sheet)
+    render(args.source ,args.rackconfig, args.output, args.sheet, )
         
 if __name__ == '__main__':
     main()
-    
+    # rackconfig = RacksConfig()
+    #rackconfig.load_from_file("config\\racks.csv")
+    #mapping =  rackconfig.get_rack_row_mapping("MD02-C02", 3)
+    #print(mapping)
    
     
     
