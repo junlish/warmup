@@ -4,10 +4,16 @@
 @author: junli
 '''
 
+import datetime
+import os
 
 from collections import defaultdict
 from operator import  attrgetter
 from openpyxl.reader.excel import load_workbook
+from openpyxl import Workbook
+from openpyxl.styles import Font,Alignment,Border,PatternFill,Side
+from openpyxl.utils import get_column_letter
+
 
 
 
@@ -24,7 +30,7 @@ class EventRecordRow:
         
     @property
     def event_date(self):
-        return self.values[0]
+        return str(self.values[0])
 
     @property
     def seq_no(self):
@@ -119,24 +125,73 @@ class PCEventsStore:
                 
                 
         return bad_pattern_seqs,lack_sheet_seqs
+    
+    def machines_in_store(self):
+        seqs_in_store = []
+        for _,events in self.seq_events.items():
+            # sort by date
+            events.sort(key=attrgetter('event_date'))
+            event_types = [event.event_type for event in events]
+            
+            if event_types[-1] in ['归还', '入库']:
+                seqs_in_store.append(events[-1])
+        return seqs_in_store
+                
        
 def main():
-    filepath = r'testdata\pcs.xlsx'
+    filepath = r'D:\shadow\办公支持\办公电脑\办公电脑实物台帐.xlsx'
+    base_name ="pcs-"+ datetime.datetime.now().strftime('%Y%m%d_%H%M%S') +".xlsx"
+    outputpath = os.path.join(r'c:\temp', base_name)
     store = PCEventsStore()
     store.load_from_file(filepath)
     print("Load {} events from file {}; Bad records: {}".format(store.count, filepath, len(store.incomplete_events)))
     print("... about {} machines.".format(len(store.seq_events)))
     
-    bad_pattern_seqs,lack_sheet_seqs = store.validate_events_sequences()
-    print("Bad sequence of events[{}]:".format(len(bad_pattern_seqs)))
-    for p,seqs in bad_pattern_seqs.items():
-        print("{} : {}".format(p, ','.join(seqs)))
-        
-    print("Those machines are lacking a sheet no:")
-    for event in lack_sheet_seqs:
-        print(event.values)
-
+    wb = Workbook()
+    ws_summary = wb.active
+    ws_summary.title = "Summary"
+    ws_summary.append(["Load {} events from file {}".format(store.count, filepath)])
+    ws_summary.append(["... about {} machines.".format(len(store.seq_events))])
+    ws_summary.append(["","", "Generated @ "+ datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')])    
+    ws_summary.append([])
     
+    if len(store.incomplete_events)>0:
+        ws_summary.append(["Bad Records:"])
+        ws_summary.append(EventRecordRow.headers)   
+        for e in store.incomplete_events:        
+            ws_summary.append(e.values)
+        
+  
+       
+    ws_summary.append([])
+    bad_pattern_seqs,lack_sheet_seqs = store.validate_events_sequences()
+    ws_summary.append(["Bad sequence of events:"])
+      
+    
+    print("Bad sequence of events: {}".format(len(bad_pattern_seqs)))
+    ws_summary.append(EventRecordRow.headers)
+    for p,seqs in bad_pattern_seqs.items():
+        print("{} : {}".format(p, ','.join(seqs)))               
+        for seq in seqs:
+            events = store.seq_events[seq]
+            for e in events:
+                ws_summary.append(e.values)
+    
+    ws_no_sheetno = wb.create_sheet("NoSheetNo")
+    ws_no_sheetno.append(EventRecordRow.headers)
+    print("Those machines are lacking a sheet no : {}".format(len(lack_sheet_seqs)))
+    for event in lack_sheet_seqs:
+        ws_no_sheetno.append(event.values)
+
+    ws_instore = wb.create_sheet("InStore")
+    ws_instore.append(EventRecordRow.headers)
+    events = store.machines_in_store()
+    print("Machines in store: {}".format(len(events)))
+    for s in events:
+        ws_instore.append(s.values)
+    
+    wb.save(outputpath)
+    print("Saved file to {}".format(outputpath))
 
 if __name__ == '__main__':    
     main()
