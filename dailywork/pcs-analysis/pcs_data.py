@@ -92,7 +92,7 @@ class PCEventsStore:
             values = [cell.value for cell in row[:record_col_count]]
             record =  EventRecordRow(values)
             # if no seq_no, bad rows 
-            if record.seq_no is None or record.seq_no=='未带待核实':
+            if record.seq_no is None or record.event_date is None:
                 incomplete_events.append(record)
             else:
                 seq_events[record.seq_no].append(record)
