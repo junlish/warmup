@@ -8,8 +8,10 @@ import os
 import time
 import collections
 import csv
+import argparse
 from urllib.request import urlopen
 from  urllib.request import urlretrieve
+
 
 from bs4 import BeautifulSoup
 
@@ -54,9 +56,9 @@ def analysis_content(page_url):
     return reports
 
 
-def get_all_report_items():
+def get_all_report_items( pages):
     all_reports = []
-    for page in range(1,MAX_PAGE):
+    for page in range(1,pages+1):
         url = "{}?p={}".format(WEB_SITE_URL, page)
         reports = analysis_content(url)
         all_reports.extend(reports)
@@ -155,27 +157,8 @@ def pdf_to_excel(pdf_file, exel_output):
         gold_rpt_df.to_excel(writer, sheet_name="gold")
         silver_rpt_df.to_excel(writer, sheet_name="silver")
 
-def gen_reports_batch():
-    reports = ["20190311-20190315周报",
-               "20190304-20190308周报",
-               "20190225-20190301周报",
-               "20190218-20190222周报",
-               "20190211-20190215周报",
-               "20190128-20190201周报",
-               "20190121-20190125周报",
-               "20190114-20190118周报",
-               "20190107-20190111周报",
-               "20190102-20190104周报"]
-
-    for report_name in reports:
-        print("Processing {}".format(report_name))
-        pdf_file = os.path.join(DOWNLOAD_FOLDER, report_name + ".pdf")
-        output_file = os.path.join(OUTPUT_FOLDER, report_name + ".xlsx")
-        pdf_to_excel(pdf_file, output_file)
-        print("Done: {}".format(report_name).center(50, '-'))
-
-def download_and_convert_latest(n):
-    reports = analysis_content(WEB_SITE_URL)
+def download_and_convert_latest(n, pages):
+    reports = get_all_report_items(pages)
     if n> len(reports):
         print("{} reports in first page, set n {}-->{}".format(len(reports), n, len(reports)))
         n = len(reports)
@@ -196,5 +179,27 @@ def download_and_convert_latest(n):
         print("Done: {}".format(latest_report.name).center(80, '-'))
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Download pdf reports from SGE website, and compose a new report')
+    parser.add_argument('--downloaddir', help='DOWNLOAD FOLDER for pdf files')
+    parser.add_argument('--outputdir', help='excel output folder')
+    parser.add_argument('-n','--count',type=int, default=1, help="Download and convert latest n reports")   
+    parser.add_argument('-p','--pages',type=int, default=1, help="Looking for first p pages")   
+    args = parser.parse_args()    
+    
+    if args.downloaddir:
+        DOWNLOAD_FOLDER = args.downloaddir
+    
+    if args.outputdir:
+        OUTPUT_FOLDER = args.outputdir
+    
+    if not os.path.isdir(DOWNLOAD_FOLDER):
+        os.makedirs(DOWNLOAD_FOLDER)
+        print("Create download folder {}".format(DOWNLOAD_FOLDER))
+        
+    if not os.path.isdir(OUTPUT_FOLDER):
+        os.makedirs(OUTPUT_FOLDER)
+        print("Create output folder {}".format(OUTPUT_FOLDER))
+   
+    
     #default: analysis first page, and generate report for the first one
-    download_and_convert_latest(1)
+    download_and_convert_latest(args.count, args.pages)
